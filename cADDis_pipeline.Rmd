@@ -1,0 +1,484 @@
+---
+title: "cADDis Pipeline"
+author: "Dain Brademan"
+date: "2024-04-05"
+output: html_document
+---
+
+This pipeline is specific to Gi-coupled receptors???
+
+# Load Required Packages
+
+```{r}
+library(data.table)
+library(readxl)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+
+drb_utils <- "https://raw.githubusercontent.com/HuttenhainLab/drb_utils/main/"
+source(paste0(drb_utils,"data_management.R"))
+```
+
+# Helper Functions
+
+```{r}
+
+#'  Reformats `metadata` `Well` column from manually typed format to cADDis format
+#'  Essentially adds an extra 0 to the beginning of single-digit well numbers if necessary
+#'  Example input: `A1`
+#'  Example output: `A01`
+#' @param input.data.table Freshly imported `metadata` table for cADDis pipeline
+Reformat.Metadata.Well.Position <- function(input.data.table) {
+  
+  # Define a function to reformat each element
+  reformat_string <- function(string) {
+    
+    letter <- gsub("[0-9]", "", string)
+    numbers <- gsub("[A-Z]", "", string)
+    
+    # If there's only one digit, add a leading zero
+    if (nchar(numbers) == 1) {
+      numbers <- paste0("0", numbers)
+    }
+    
+    # Combine the letter and possibly modified number
+    formatted_string <- paste0(letter, numbers)
+    
+    return(formatted_string)
+  }
+  
+  # Apply the reformatting function to the "Well" column
+  input.data.table$Well <- sapply(input.data.table$Well, reformat_string)
+  
+  return(input.data.table)
+}
+
+#'  Adds a `Replicate` column to metadata table
+#'  For all unique combinations of `Drug` and `[Conc]`, insert a replicate number 
+#'  @param input.data.table `metadata` table for the cADDis pipeline before or 
+#'  @param force (optional). Recreates `Replicate` column regardless if it already exists 
+Reformat.Metadata.Add.Replicates <- function(input.data.table, force = FALSE) {
+  
+  if (!force) {
+    if ("Replicate" %in% names(input.data.table)) {
+      stop("Error: Replicate column already exists in metadata table.\n\nEither remove this function, or set force = TRUE to update Replicate column.")
+    }
+  }
+  
+  return.table <- input.data.table %>%
+    group_by(Drug, `[Conc]`) %>%
+    mutate(Replicate = row_number())
+  
+  return(return.table)
+}
+
+#'  Adds an extra 0 to the beginning of single-digit well numbers if necessary
+#'  Example input: `A1`
+#'  Example output: `A01`
+#' @param input.data.table Freshly imported `metadata` table for cADDis pipeline
+Reformat.Metadata.Well.Position <- function(input.data.table) {
+  
+  # Define a function to reformat each element
+  reformat_string <- function(string) {
+    
+    letter <- gsub("[0-9]", "", string)
+    numbers <- gsub("[A-Z]", "", string)
+    
+    # If there's only one digit, add a leading zero
+    if (nchar(numbers) == 1) {
+      numbers <- paste0("0", numbers)
+    }
+    
+    # Combine the letter and possibly modified number
+    formatted_string <- paste0(letter, numbers)
+    
+    return(formatted_string)
+  }
+  
+  # Apply the reformatting function to the "Well" column
+  input.data.table$Well <- sapply(input.data.table$Well, reformat_string)
+  
+  return(input.data.table)
+}
+
+#'  Takes input cADDis data table and pivots it from wide-to-long format
+#'  Replaces RAW*** column headers with cADDis read time points pre-pivot
+#'  Also converts time from "#min ##second format to float format
+#' @param input.data.table Freshly imported baseline or treatment table for cADDis pipeline
+#' @returns Long-format cADDis table containing `Well`, `Measurement.Time`, and `Raw.Reading`
+Pivot.cADDIs.Data.Table <- function(input.data.table) {
+  
+  # Reformatted table to return
+  return.table <- input.data.table
+  
+  return.table <- return.table[,-c(2)]
+  
+  # Extract time points from the first row, ignoring the first Well" column
+  time_points <- return.table[1, -c(1)]
+  
+  # Remove the first row after extraction(timepoints)
+  return.table <- return.table[-c(1), ]
+  
+  # Rename the column names to the extracted time points
+  colnames(return.table)[-c(1)] <- time_points
+  
+  # Melt the data into long format
+  return.table <- return.table %>%
+    pivot_longer(cols = -Well, names_to = "Measurement.Time", values_to = "Raw.Reading")
+  
+  # Convert measurement time to numeric
+  return.table$Measurement.Time <- sapply(return.table$Measurement.Time, Format.cADDis.Read.Time)
+  
+  # Convert fluoresence reading to numeric
+  return.table$Raw.Reading <- as.numeric(return.table$Raw.Reading)
+    
+  return(return.table)
+}
+
+#'  Formats cADDis time value from string "# min ## s" to float
+#'  e.g. "1 min 30 s" will be converted to 1.5
+#'  @param input.data.string String time value in the format "# min" or "# min ## s"
+Format.cADDis.Read.Time <- function(input.time.string) {
+  
+  # split string into minute and second components on space characters
+  time.components <- strsplit(input.time.string, ' ')[[1]]
+  
+  # not sure if hours will ever be a measurement, but throw error to let user know
+  if (length(time.components) >= 5) {
+    stop(paste0("Error: Issue converting cADDis timepoint \"", input.time.string, "\" to floating-point format. Extra components found.\n\n Pipeline has only been set up to handle strings with the form \"# min ## sec\".Double check the format of measurement times in your cADDis baseline & treatment tables."))
+  } else if (length(time.components) == 4) {
+    minutes <- as.numeric(time.components[1])
+    seconds <- as.numeric(time.components[3]) / 60
+    return.number <- minutes + seconds
+    
+    return(return.number)
+  } else if (length(time.components) == 2) {
+    return.number <- as.numeric(time.components[1])
+    return(return.number)
+  } else {
+    # Throw error if time.components is hasn't fit any expected format so far.
+    stop(paste0("Error: Issue converting cADDis timepoint \"", input.time.string, "\" to floating-point format. Unexpected components found.\n\n Pipeline has only been set up to handle strings with the form \"# min ## sec\".Double check the format of measurement times in your cADDis baseline & treatment tables."))
+  }
+  
+  return(return.number)
+}
+
+#'  Extracts no-cADDis background from a baseline or treatment data table
+#'  @param input.data.table `baseline` or `treatment` data tables to extract background data from
+#'  @param no.cADDis.condition Condition label for the no-cADDis wells
+#'  @returns A data table containing `Measurement.Time`, `Reading.Mean`, and `Reading.StDev` from only the no.caddis samples
+Extract.cADDis.Background.Signal <- function(input.data.table, no.cADDis.condition, target.column = "Raw.Reading") {
+  
+  if (!(no.cADDis.condition %in% unique(input.data.table$Drug))) {
+    stop(paste0("ERROR: The provided condition string \"", no.cADDis.condition, "\" was not found in the input data table. Double check that this condition is spelled correctly and exists in the input dataset."))
+  }
+  
+  # subset no caddis data from the data table
+  no.caddis.data <- input.data.table %>%
+    filter(Drug %in% no.cADDis.condition)
+  
+  target.column <- ensym(target.column)
+  
+  # Calculate mean and standard deviation for each time point
+  return.data <- no.caddis.data %>%
+    group_by(Measurement.Time) %>%
+    summarize(Reading.Mean = mean(!!target.column),
+              Reading.StDev = sd(!!target.column))
+  
+  return(return.data)
+}
+
+#'  Corrects raw assay reads using mean read values from no-cADDis samples
+#'  @param input.data.table `baseline` or `treatment` data tables to correct. 
+#'  @param cADDis.correction 
+#'  @returns A background-corrected data table
+Background.Correct.Data.Table <- function(input.data.table, cADDis.correction) {
+  
+  intermediate.data.table <- input.data.table
+  
+  intermediate.data.table <- merge(input.data.table, cADDis.correction, by = "Measurement.Time")
+  
+  intermediate.data.table$Corrected.Reading <- intermediate.data.table$Raw.Reading - intermediate.data.table$Reading.Mean
+  
+  return.data <- intermediate.data.table[, c("Well", "Drug", "[Conc]", "Fluoro", "Replicate", "Measurement.Time", "Raw.Reading", "Reading.Mean", "Corrected.Reading")]
+  return(return.data)
+}
+
+#'  Calculates ΔF/Fₒ ratio per well from the corrected baseline and treatment data
+#'  @param corrected.treatment.table No-cADDis-corrected treatment table. 
+#'  @param corrected.baseline.table No-cADDis-corrected baseline table. 
+#'  @returns A concatenated baseline & treatment data table with ΔF/Fₒ values calculated for all wells and time points
+Calculate.Fluoresence.Ratios <- function(corrected.treatment.table, corrected.baseline.table) {
+  
+  # To calculate ΔF/Fₒ, we need to take the treatment readings, subtract the average baseline reading, and divide by the average baseline reading.
+  
+  corrected.treatment.table <- results$treatment$corrected.table
+  corrected.baseline.table <- results$baseline$corrected.table
+  
+  # Calculate average baseline reading per well over the entire baseline table
+  baseline.summary <- corrected.baseline.table %>%
+    group_by(Drug, `[Conc]`, Well) %>%
+    summarize(Baseline.Mean = mean(Corrected.Reading),
+              Baseline.StDev = sd(Corrected.Reading))
+  
+  # merge baseline.summary onto the corrected.baseline.table to do the ΔF/Fₒ calculation per well
+  merged.baseline.table <- merge(corrected.baseline.table, baseline.summary, by = c("Well"))
+  merged.baseline.table$ΔF.Fₒ <- (merged.baseline.table$Corrected.Reading - merged.baseline.table$Baseline.Mean) / merged.baseline.table$Baseline.Mean
+  merged.baseline.table$Type <- "Baseline"
+  
+  # merge baseline.summary onto the corrected.treatment.table to do the ΔF/Fₒ calculation per well
+  merged.treatment.table <- merge(corrected.treatment.table, baseline.summary, by = c("Well"))
+  merged.treatment.table$ΔF.Fₒ <- (merged.treatment.table$Corrected.Reading - merged.treatment.table$Baseline.Mean) / merged.treatment.table$Baseline.Mean
+  merged.treatment.table$Type = "Treatment"
+  
+  # shift treatment table timepoints by the max time in the baseline table to make a linear plot
+  max.baseline.time <- max(merged.baseline.table$Measurement.Time)
+  merged.treatment.table$Measurement.Time <- merged.treatment.table$Measurement.Time + max.baseline.time
+  
+  return.table <- as.data.table(rbind(merged.baseline.table, merged.treatment.table))
+  
+  # Remove redundant columns from return table
+  return.table[, c("Drug.y", "[Conc].y") := NULL]
+  
+  # rename drug & conc columns
+  setnames(return.table, c("Drug.x", "[Conc].x"), c("Drug", "[Conc]"))
+  
+  return(return.table)
+}
+
+```
+
+# Set parameters for file parsing
+
+```{r}
+
+# Define the file paths & sheet names for three Excel Spreadsheets
+  # Metadata, Baseline, Treatment
+
+# Each file has a filepath, sheet name, and skipline property.
+  # filepath: path to the file, absolute or relative
+  # sheet: name of the Excel spreadsheet
+  # skiplines: number of rows to skip before the desired data table
+
+# Metadata File Information
+metadata = list(
+  filepath = "./example_data/040342024_Layout.xlsx",
+  sheet = "Table_Meta",
+  skiplines = 0
+)
+
+# Baseline File Information
+baseline = list(
+  filepath = "./example_data/04032024_baseline.xlsx",
+  sheet = "Table All Cycles",
+  skiplines = 9
+)
+
+# Treatment File Information
+treatment = list(
+  filepath = "./example_data/04032024_damgoDR.xlsx",
+  sheet = "Table All Cycles",
+  skiplines = 9
+)
+```
+
+# Set parameters for experiment-specific comparisons
+
+```{r}
+# create subdirectories to store intermediate tables and figures
+data.name <- "cADDis_Pipeline"
+Create.Pipeline.Directories(data.name)
+
+# Define experimental condition categories & comparison sets
+  # cADDis-negative control - no fluorophore. Is subtracted from every reading
+cADDis.control <- "NO cADDis"
+
+# Comparisons - Groups relevant ceiling curves & conditions together.
+experiment.comparisons <- list()
+
+###
+# Repeat this chunk as many times as relevant to what's in your plate.
+###
+comparison <- list(
+  label = "ISO Treatment",
+  ceiling.condition = "ISO Alone",
+  sample.conditions = c("ISO + D (0.0001)", "ISO + D (0.001)", "ISO + D (0.01)", "ISO + D (0.1)", "ISO + D (1)", "ISO + D (10)")
+)
+
+experiment.comparisons <- append(experiment.comparisons, list(comparison)) # stores the experimental comparison in a running list
+
+###
+# Repeat this chunk as many times as relevant to what's in your plate.
+###
+comparison <- list(
+  label = "FSK Treatment",
+  ceiling.condition = "FSK Alone",
+  sample.conditions = c("FSK + D (0.0001)","FSK + D (0.001)","FSK + D (0.01)","FSK + D (0.1)","FSK + D (1)","FSK + D (10)")
+)
+
+experiment.comparisons <- append(experiment.comparisons, list(comparison))
+
+```
+
+# Package up everything into a nice data format for downstream operations
+
+You shouldn't need to edit this chunk unless you're doing something more advanced
+
+```{r}
+# Package up all these parameters into one variable for easy access down the line
+parameters <- list(
+  # input files & manipulated data
+  metadata = metadata,
+  baseline = baseline,
+  treatment = treatment,
+  
+  # experiment-specific parameters
+  cADDis.control = cADDis.control,
+  experiment.comparisons = experiment.comparisons
+  
+)
+
+rm(experiment.comparisons)
+```
+
+# Read in data using provided parameters
+
+```{r}
+
+metadata <- read_excel(parameters$metadata$filepath, 
+                       sheet = parameters$metadata$sheet)
+
+baseline <- read_excel(parameters$baseline$filepath, 
+                       sheet = parameters$baseline$sheet, 
+                       skip = parameters$baseline$skiplines)
+
+treatment <- read_excel(parameters$treatment$filepath, 
+                        sheet = parameters$treatment$sheet, 
+                        skip = parameters$treatment$skiplines)
+
+```
+
+# Clean imported data tables
+
+```{r}
+
+# cADDis software exports well data in the format A01, A02, etc. 
+# Example_Metadata is in the format A1, A2, etc. 
+# Need to correct this to to make sure data tables merge correctly.
+metadata <- Reformat.Metadata.Well.Position(metadata)
+
+# Add Replicate column to metadata table if it doesn't exist
+metadata <- Reformat.Metadata.Add.Replicates(metadata)
+
+# Baseline and treatment tables are in wide-format.
+# Does the following data manipulations: 
+  # Remove unneccesary metadata  
+  # Pivot table from wide to long format.
+  # Join-in measurement times
+  # Parse measurement times to from string to numeric
+baseline <- Pivot.cADDIs.Data.Table(baseline)
+treatment <- Pivot.cADDIs.Data.Table(treatment)
+
+```
+
+# Merge metadata table with treatment & baseline tables
+
+```{r}
+
+baseline <- merge(baseline, metadata, by = "Well", all = TRUE)
+treatment <- merge(treatment, metadata, by = "Well", all = TRUE)
+
+```
+
+# Extract the no cADDis background from the baseline & treatment tables
+
+```{r}
+# Variable to store all analysis results
+results <- list(
+  baseline = list(),
+  treatment = list()
+)
+
+# get mean & st.dev for the no cADDis background wells over time
+# this will be subtracted from all other measurements
+results$baseline$no.cADDis.background <- Extract.cADDis.Background.Signal(baseline, parameters$cADDis.control)
+results$treatment$no.cADDis.background <- Extract.cADDis.Background.Signal(treatment, parameters$cADDis.control)
+
+```
+
+# Subtract the no-cADDis background from the baseline/treatment data tables.
+
+Linearly shift all data with respect to the no-cADDis samples. This effectively zeroes all readings at all timepoints to the no-cADDis samples.
+
+```{r}
+
+# Correct all readings. If this works, when we recalculate the no.cADDis background, the mean no-cADDis readings will be set to zero.
+results$baseline$corrected.table <- Background.Correct.Data.Table(baseline, results$baseline$no.cADDis.background)
+results$treatment$corrected.table <- Background.Correct.Data.Table(treatment, results$treatment$no.cADDis.background)
+
+Save.Csv.With.Timestamp(results$baseline$corrected.table, "baseline_nocADDis_corrected.csv", paste(data.name, "data", sep = "_"))
+Save.Csv.With.Timestamp(results$treatment$corrected.table, "treatment_nocADDis_corrected.csv", paste(data.name, "data", sep = "_"))
+
+# Check to make sure background zeroed out correctly
+background.test <- Extract.cADDis.Background.Signal(input.data.table = results$baseline$corrected.table, 
+                                                    no.cADDis.condition = parameters$cADDis.control, 
+                                                    target.column = "Corrected.Reading")
+
+ggplot(background.test, aes(x = Measurement.Time, y = Reading.Mean)) +
+  geom_line() +                                            
+  geom_ribbon(aes(ymin = Reading.Mean - Reading.StDev,         
+                  ymax = Reading.Mean + Reading.StDev),
+              alpha = 0.3) +                                
+  labs(title = "No-cADDis readings post-correction", x = "Measurement Time", y = "Mean Reading of No-cADDis Samples")          
+
+# remove the temp variables
+ggsave(paste(paste(data.name, "figures", sep = "_"), "QC_BackgroundCorrection_Validation.pdf", sep = "/"))
+
+rm(background.test)
+```
+
+# Calculate ΔF/Fₒ ratios for all samples
+
+```{r}
+
+results$combined <- list(ΔF.Fₒ.Table = Calculate.Fluoresence.Ratios(results$treatment$corrected.table, results$baseline$corrected.table))
+
+Save.Csv.With.Timestamp(results$combined$ΔF.Fₒ.Table, "combined_experiment_results.csv", paste(data.name, "data", sep = "_"))
+
+```
+# Visualize response curves 
+
+```{r}
+
+# calculate mean/standard deviation of all conditions across plate
+results.combined.summary <- results$combined$ΔF.Fₒ.Table %>%
+  group_by(Drug, Measurement.Time) %>%
+  summarize(Mean.dF.Fo = mean(ΔF.Fₒ),
+            StDev.dF.Fo = sd(ΔF.Fₒ))
+
+# get max time of baseline (i.e. when treatment starts)
+max.baseline.time <-  results$combined$ΔF.Fₒ.Table %>%
+  filter(Type == "Baseline") %>%
+  pull(Measurement.Time) %>%
+  max()
+
+lapply(experiment.comparisons, function(comparison) {
+  
+  samples <- results.combined.summary %>%
+    filter(Drug %in% comparison$ceiling.condition | Drug %in% comparison$sample.conditions)
+  
+  ggplot(samples, aes(x = Measurement.Time, y = Mean.dF.Fo, color = Drug)) +
+    geom_line() + 
+    geom_ribbon(aes(ymin = Mean.dF.Fo - StDev.dF.Fo,         
+                  ymax = Mean.dF.Fo + StDev.dF.Fo,
+                  fill = Drug),
+              alpha = 0.3) +
+    geom_vline(xintercept = max.baseline.time, linetype = "dashed", color = "darkgray") +
+    labs(title = paste0("DeltaF/Fo responses for ", comparison$label, " FSK samples"), x = "Measurement Time", y = "Delta F/Fo") +
+    theme_bw()
+  
+  ggsave(paste(paste(data.name, "figures", sep = "_"), paste(comparison$label, "DeltaF_Fo_Curves.pdf", sep = "_"), sep = "/")) 
+  
+})
+```
