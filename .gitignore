@@ -1,0 +1,2 @@
+# Ignore any generated folders for development purposes, e.g. folderers containing the text "DEV_"
+**/*DEV_*/
