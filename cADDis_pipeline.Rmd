@@ -5,8 +5,6 @@ date: "2024-04-05"
 output: html_document
 ---
 
-This pipeline is specific to Gi-coupled receptors???
-
 # Load Required Packages
 
 ```{r}
@@ -18,7 +16,7 @@ library(ggplot2)
 
 drb_utils <- "https://raw.githubusercontent.com/HuttenhainLab/drb_utils/main/"
 source(paste0(drb_utils,"data_management.R"))
-source(paste0(drb_utils,"cADDis_pipeline_utils.R"))
+source(paste0(drb_utils, "cADDis_pipeline_utils.R"))
 ```
 
 # Set parameters for file parsing
@@ -35,64 +33,51 @@ source(paste0(drb_utils,"cADDis_pipeline_utils.R"))
 
 # Metadata File Information
 metadata = list(
-  filepath = "./example_data/040342024_Layout.xlsx",
-  sheet = "Table_Meta",
+  filepath = "./real_data/04252024_FENT_meta.xlsx",
+  sheet = "metadata",
   skiplines = 0
 )
 
 # Baseline File Information
 baseline = list(
-  filepath = "./example_data/04032024_baseline.xlsx",
+  filepath = "./real_data/04252024_FENT_baseline.xlsx",
   sheet = "Table All Cycles",
-  skiplines = 9
+  skiplines = 10
 )
 
 # Treatment File Information
 treatment = list(
-  filepath = "./example_data/04032024_damgoDR.xlsx",
+  filepath = "./real_data/04252024_FENT_doseresponse.xlsx",
   sheet = "Table All Cycles",
-  skiplines = 9
+  skiplines = 10
 )
 ```
 
-# Set parameters for experiment-specific comparisons
-
 ```{r}
 # create subdirectories to store intermediate tables and figures
-data.name <- "cADDis_Pipeline"
+data.name <- "DEV_"
 Create.Pipeline.Directories(data.name)
 
 # Define experimental condition categories & comparison sets
   # cADDis-negative control - no fluorophore.
-cADDis.control <- "NO cADDis"
+cADDis.control <- "NO cADDis.Vehicle.NA"
 
 # Correct all measurements using the cADDis.Control. Default is false
-fluorophore.correction = FALSE
+fluorophore.correction = TRUE
 
 # Comparisons - Groups relevant ceiling curves & conditions together.
+  # If you don't know what your condition names will be, you can define them later in the pipeline
 experiment.comparisons <- list()
 
-###
-# Repeat this chunk as many times as relevant to what's in your plate.
-###
-comparison <- list(
-  label = "ISO Treatment",
-  ceiling.condition = "ISO Alone",
-  sample.conditions = c("ISO + D (0.0001)", "ISO + D (0.001)", "ISO + D (0.01)", "ISO + D (0.1)", "ISO + D (1)", "ISO + D (10)")
-)
-
-experiment.comparisons <- append(experiment.comparisons, list(comparison)) # stores the experimental comparison in a running list
-
-###
-# Repeat this chunk as many times as relevant to what's in your plate.
-###
-comparison <- list(
-  label = "FSK Treatment",
-  ceiling.condition = "FSK Alone",
-  sample.conditions = c("FSK + D (0.0001)","FSK + D (0.001)","FSK + D (0.01)","FSK + D (0.1)","FSK + D (1)","FSK + D (10)")
-)
-
-experiment.comparisons <- append(experiment.comparisons, list(comparison))
+    ###
+    # Repeat this chunk as many times as relevant to what's in your plate.
+    ###
+    comparison <- list(
+      label = "Forskolin + Fentanyl",
+      ceiling.group = "FSK Alone.Vehicle.NA",
+      sample.group = c("cADDis Alone.Vehicle.NA","FSK.FENT.1 uM","FSK.FENT.100 nM","FSK.FENT.10 nM","FSK.FENT.5 nM","FSK.FENT.1 nM","FSK.FENT.500 pM","FSK.FENT.100 pM","FSK.FENT.10 pM","FSK.FENT.1 pM")
+    )
+    experiment.comparisons <- append(experiment.comparisons, list(comparison)) # stores the experimental comparison in a running list
 
 ```
 
@@ -115,6 +100,7 @@ parameters <- list(
 )
 
 ```
+
 
 # Read in data using provided parameters
 
@@ -142,6 +128,15 @@ treatment <- read_excel(parameters$treatment$filepath,
 # Need to correct this to to make sure data tables merge correctly.
 metadata <- Reformat.Metadata.Well.Position(metadata)
 
+# Derive experimental groups from the metadata column
+  # Are your experimental groups already delineated in the "Condition" column? 
+  # Use this then
+# metadata <- Reformat.Metadata.Determine.Experimental.Groups(input.data.table,
+#                                                              use.conditions = true)
+  # Does your Condition column just contain the stimulant?
+  # Use this
+metadata <- Reformat.Metadata.Determine.Experimental.Groups(metadata)
+
 # Add Replicate column to metadata table if it doesn't exist
 metadata <- Reformat.Metadata.Add.Replicates(metadata)
 
@@ -155,6 +150,29 @@ baseline <- Pivot.cADDIs.Data.Table(baseline)
 treatment <- Pivot.cADDIs.Data.Table(treatment)
 
 ```
+
+# If experiment comparisons are undefined currently, define them now using the derived Groups
+```{r}
+print(unique(metadata$Group))
+```
+
+```{r}
+# Uncomment this to define your experimental comparisons.
+# Comparisons - Groups relevant ceiling curves & conditions together.
+# experiment.comparisons <- list()
+# 
+#     ###
+#     # Repeat this chunk as many times as relevant to what's in your plate.
+#     ###
+#     comparison <- list(
+#       label = "MPH Agonist",
+#       ceiling.group = "FSK Alone.Vehicle.NA",
+#       sample.group = c("FSK.MPH.1 uM", "FSK.MPH.100 nM", "FSK.MPH.10 nM","FSK.MPH.5 nM","FSK.MPH.1 nM","FSK.MPH.500 pM","FSK.MPH.100 pM","FSK.MPH.10 pM","FSK.MPH.1 pM")
+#     )
+#     experiment.comparisons <- append(experiment.comparisons, list(comparison)) # stores the experimental comparison in a running list
+```
+
+
 
 # Merge metadata table with treatment & baseline tables
 
@@ -191,17 +209,19 @@ If conduct.correction == FALSE or no.cADDis.background == NULL, just return the 
 
 # Correct all readings. If this works, when we recalculate the no.cADDis background, the mean no-cADDis readings will be set to zero.
   results$baseline$corrected.table <- Background.Correct.Data.Table(baseline, 
-                                                                    results$baseline$no.cADDis.background)
+                                                                    results$baseline$no.cADDis.background, 
+                                                                    conduct.correction = fluorophore.correction)
 
   results$treatment$corrected.table <- Background.Correct.Data.Table(treatment, 
-                                                                     results$treatment$no.cADDis.background)
+                                                                     results$treatment$no.cADDis.background, 
+                                                                     conduct.correction = fluorophore.correction)
 
 Save.Csv.With.Timestamp(results$baseline$corrected.table, "baseline_nocADDis_corrected.csv", paste(data.name, "data", sep = "_"))
 Save.Csv.With.Timestamp(results$treatment$corrected.table, "treatment_nocADDis_corrected.csv", paste(data.name, "data", sep = "_"))
 
 # Check to make sure background zeroed out correctly
 background.test <- Extract.cADDis.Background.Signal(input.data.table = results$baseline$corrected.table, 
-                                                    no.cADDis.condition = parameters$cADDis.control, 
+                                                    no.cADDis.group = parameters$cADDis.control, 
                                                     target.column = "Corrected.Reading")
 
 ggplot(background.test, aes(x = Measurement.Time, y = Reading.Mean)) +
@@ -217,7 +237,7 @@ ggsave(paste(paste(data.name, "figures", sep = "_"), "QC_BackgroundCorrection_Va
 rm(background.test)
 ```
 
-# Calculate ΔF/Fₒ ratios for all samples
+# Calculate ΔF/Fₒ ratios for all samples 
 
 ```{r}
 
@@ -227,13 +247,53 @@ Save.Csv.With.Timestamp(results$combined$ΔF.Fₒ.Table, "combined_experiment_re
 
 ```
 
+# Plot each groups replicate curves in a grid pattern for manual inspection of each group's samples
+
+```{r}
+# get max time of baseline (i.e. when treatment starts)
+max.baseline.time <-  results$combined$ΔF.Fₒ.Table %>%
+  filter(Type == "Baseline") %>%
+  pull(Measurement.Time) %>%
+  max()
+
+# UNCOMMENT TO PLOT ONE AT A TIME
+# lapply(unique(results$combined$ΔF.Fₒ.Table$Group), function(group) {
+#   
+#   plottable.data <- as.data.table(results$combined$ΔF.Fₒ.Table) %>%
+#     filter(Group %in% group)
+#   
+#   # prevents odd NA-value errors
+#   if (is.na(group)) {
+#     return()
+#   }
+#   
+#   p <- ggplot(plottable.data, aes(x = Measurement.Time, y = ΔF.Fₒ, color = factor(Replicate))) +
+#   geom_point() +  # Scatterplot
+#   geom_vline(xintercept = max.baseline.time, linetype = "dashed", color = "darkgray") +
+#   labs(title = paste0(group, "\n\nReplicate-level Delta F/Fo Scatterplot"), x = "Measurement Time (minutes)", y = "Delta F/Fo")
+#   
+#   print(p)
+# })
+
+# UNCOMMENT TO PLOT ALL IN A GRID
+p <- ggplot(results$combined$ΔF.Fₒ.Table, aes(x = Measurement.Time, y = ΔF.Fₒ, color = factor(Replicate))) +
+  geom_point() +  # Scatterplot
+  geom_vline(xintercept = max.baseline.time, linetype = "dashed", color = "darkgray") +
+  labs(title = "Scatterplot of Time vs Measurement by Group", x = "Time (minutes)", y = "Delta F/Fo") +
+  facet_wrap(~ Group, scales = "free")
+
+print(p)
+
+ggsave(paste(paste(data.name, "figures", sep = "_"), "Replicate DeltaF_Fo_Curves.pdf", sep = "/"), p, width = 20, height = 15, units = "in", dpi = 300) 
+```
+
 # Visualize response curves 
 
 ```{r}
 
 # calculate mean/standard deviation of all conditions across plate
 results.combined.summary <- results$combined$ΔF.Fₒ.Table %>%
-  group_by(Drug, Measurement.Time) %>%
+  group_by(Group, Measurement.Time) %>%
   summarize(Mean.dF.Fo = mean(ΔF.Fₒ),
             StDev.dF.Fo = sd(ΔF.Fₒ))
 
@@ -246,9 +306,9 @@ max.baseline.time <-  results$combined$ΔF.Fₒ.Table %>%
 lapply(parameters$experiment.comparisons, function(comparison) {
   
   samples <- as.data.table(results.combined.summary) %>%
-    filter(Drug %in% comparison$ceiling.condition | Drug %in% comparison$sample.conditions)
+    filter(Group %in% comparison$ceiling.group | Group %in% comparison$sample.group)
   
-  samples[, Drug := factor(Drug, levels = sort(unique(Drug), decreasing = TRUE))]
+  #samples[, Group := factor(Group, levels = sort(unique(Group), decreasing = TRUE))]
   
   # ggplot(samples, aes(x = Measurement.Time, y = Mean.dF.Fo, color = Drug)) +
   #   geom_line() + 
@@ -260,21 +320,92 @@ lapply(parameters$experiment.comparisons, function(comparison) {
   #   labs(title = paste0("DeltaF/Fo responses for ", comparison$label, " FSK samples"), x = "Measurement Time", y = "Delta F/Fo") +
   #   theme_bw()
   
-  ggplot(samples, aes(x = Measurement.Time, y = Mean.dF.Fo, color = Drug)) +
+  p <- ggplot(samples, aes(x = Measurement.Time, y = Mean.dF.Fo, color = Group)) +
     geom_point() + 
     geom_errorbar(aes(ymin = Mean.dF.Fo - StDev.dF.Fo,
                       ymax = Mean.dF.Fo + StDev.dF.Fo),
                   linewidth = 0.1,
                   width = 0.2) +
     geom_vline(xintercept = max.baseline.time, linetype = "dashed", color = "darkgray") +
-    labs(title = paste0("DeltaF/Fo responses for ", comparison$label, " FSK samples"), x = "Measurement Time (min)", y = "Delta F/Fo") +
+    labs(title = paste0("DeltaF/Fo responses for ", comparison$label, " samples"), x = "Measurement Time (min)", y = "Delta F/Fo") +
     scale_color_viridis_d(option = "turbo") +
     theme_bw() + 
     theme(aspect.ratio= 1 / 2)
+  
+  print(p)
   
   ggsave(paste(paste(data.name, "figures", sep = "_"), paste(comparison$label, "DeltaF_Fo_Curves.pdf", sep = "_"), sep = "/")) 
   
 })
 ```
 
-# Derive AUC 
+# Calculate AUC curves per replicate
+
+```{r}
+# Break up dF/Fo table by Group & Replicate
+replicate.subsets <- split(results$combined$ΔF.Fₒ.Table, list(results$combined$ΔF.Fₒ.Table$Group, results$combined$ΔF.Fₒ.Table$Replicate))
+
+# Calculate area under the curve using midpoint approximation for each replicate
+replicate.AUC.data <- lapply(replicate.subsets, Calculate.Replicate.AUC)
+
+# Combine replicates back together into 1 list
+results$combined$AUC.Integration <- rbindlist(replicate.AUC.data)
+
+# Write out results to CSV
+Save.Csv.With.Timestamp(results$combined$AUC.Integration, "dF-Fo_AreaUnderCurve.csv", paste(data.name, "data", sep = "_"))
+
+```
+
+# Calculate % Inhibition From Ceiling per Group
+``` {r}
+
+lapply(parameters$experiment.comparisons, function(comparison) {
+  
+  summarized.Replicate.AUCs <- as.data.table(results$combined$AUC.Integration) %>%
+    filter(Group %in% comparison$ceiling.group | Group %in% comparison$sample.group) %>%
+    group_by(Group, Replicate, Agonist.Conc) %>%
+    summarise(Raw.AUC = sum(Area))
+  
+  summarized.Group.AUCs <- summarized.Replicate.AUCs %>%
+    group_by(Group, Agonist.Conc) %>%
+    summarise(Mean.Raw.AUC = mean(Raw.AUC),
+              StDev.Raw.AUC = sd(Raw.AUC))
+  
+  ceiling.Mean.Raw.AUC <- summarized.Group.AUCs %>%
+    filter(Group %in% comparison$ceiling.group)
+  
+  ceiling.Mean.Raw.AUC <- ceiling.Mean.Raw.AUC$Mean.Raw.AUC
+  
+  summarized.Group.AUCs$Normalized.Mean.AUC <- 100 - (summarized.Group.AUCs$Mean.Raw.AUC / ceiling.Mean.Raw.AUC) * 100
+  summarized.Group.AUCs$Normalized.StDev.AUC <- (summarized.Group.AUCs$StDev.Raw.AUC / ceiling.Mean.Raw.AUC) * 100
+  
+  plottable.data <- summarized.Group.AUCs %>%
+    filter(Agonist.Conc != "NA")
+  
+  plottable.data$Agonist.Conc <- as.numeric(plottable.data$Agonist.Conc)
+  
+  View(plottable.data)
+  
+  p <- ggplot(plottable.data, aes(x = Agonist.Conc, y = Normalized.Mean.AUC)) +
+    geom_point() + 
+    geom_errorbar(aes(ymin = Normalized.Mean.AUC - Normalized.StDev.AUC,
+                      ymax = Normalized.Mean.AUC + Normalized.StDev.AUC),
+                  linewidth = 0.1,
+                  width = 0.2) +
+    labs(title = paste0("EC50 Curve for ", comparison$label), x = "Agonist Concentration", y = "% Inhibition") +
+    scale_color_viridis_d(option = "turbo") +
+    theme_bw() +
+    scale_x_log10()
+  
+  print(p)
+  
+  ggsave(paste(paste(data.name, "figures", sep = "_"), paste(comparison$label, "DeltaF_Fo_Curves.pdf", sep = "_"), sep = "/")) 
+  
+  Save.Csv.With.Timestamp(summarized.Group.AUCs, paste(comparison$label, "GroupAUCs_v2.csv", sep = "_"), paste(data.name, "data", sep = "_"))
+})
+
+
+```
+
+
+
