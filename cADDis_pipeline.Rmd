@@ -399,7 +399,7 @@ lapply(parameters$experiment.comparisons, function(comparison) {
   
   print(p)
   
-  ggsave(paste(paste(data.name, "figures", sep = "_"), paste(comparison$label, "DeltaF_Fo_Curves.pdf", sep = "_"), sep = "/")) 
+  ggsave(paste(paste(data.name, "figures", sep = "_"), paste(comparison$label, "EC50_Curves.pdf", sep = "_"), sep = "/")) 
   
   Save.Csv.With.Timestamp(summarized.Group.AUCs, paste(comparison$label, "GroupAUCs_v2.csv", sep = "_"), paste(data.name, "data", sep = "_"))
 })
