@@ -295,10 +295,12 @@ ggsave(paste(paste(data.name, "figures", sep = "_"), "Replicate DeltaF_Fo_Curves
 results.combined.summary <- results$combined$ΔF.Fₒ.Table %>%
   group_by(Group, Measurement.Time) %>%
   summarize(Mean.dF.Fo = mean(ΔF.Fₒ),
-            StDev.dF.Fo = sd(ΔF.Fₒ))
+            StDev.dF.Fo = sd(ΔF.Fₒ),
+            Agonist.Conc = `Agonist Conc`,
+            .groups = 'drop')
 
 # get max time of baseline (i.e. when treatment starts)
-max.baseline.time <-  results$combined$ΔF.Fₒ.Table %>%
+max.baseline.time <- results$combined$ΔF.Fₒ.Table %>%
   filter(Type == "Baseline") %>%
   pull(Measurement.Time) %>%
   max()
@@ -307,35 +309,28 @@ lapply(parameters$experiment.comparisons, function(comparison) {
   
   samples <- as.data.table(results.combined.summary) %>%
     filter(Group %in% comparison$ceiling.group | Group %in% comparison$sample.group)
-  
-  #samples[, Group := factor(Group, levels = sort(unique(Group), decreasing = TRUE))]
-  
-  # ggplot(samples, aes(x = Measurement.Time, y = Mean.dF.Fo, color = Drug)) +
-  #   geom_line() + 
-  #   geom_ribbon(aes(ymin = Mean.dF.Fo - StDev.dF.Fo,
-  #                 ymax = Mean.dF.Fo + StDev.dF.Fo,
-  #                 fill = Drug),
-  #             alpha = 0.3) +
-  #   geom_vline(xintercept = max.baseline.time, linetype = "dashed", color = "darkgray") +
-  #   labs(title = paste0("DeltaF/Fo responses for ", comparison$label, " FSK samples"), x = "Measurement Time", y = "Delta F/Fo") +
-  #   theme_bw()
+
+  samples <- samples %>%
+    arrange(desc(Agonist.Conc)) %>%
+    mutate(Group = factor(Group, levels = unique(Group)))
+  View(samples)
+  print()
   
   p <- ggplot(samples, aes(x = Measurement.Time, y = Mean.dF.Fo, color = Group)) +
     geom_point() + 
-    geom_errorbar(aes(ymin = Mean.dF.Fo - StDev.dF.Fo,
-                      ymax = Mean.dF.Fo + StDev.dF.Fo),
-                  linewidth = 0.1,
-                  width = 0.2) +
+    # geom_errorbar(aes(ymin = Mean.dF.Fo - StDev.dF.Fo,
+    #                   ymax = Mean.dF.Fo + StDev.dF.Fo),
+    #               linewidth = 0.1,
+    #               width = 0.2) +
     geom_vline(xintercept = max.baseline.time, linetype = "dashed", color = "darkgray") +
     labs(title = paste0("DeltaF/Fo responses for ", comparison$label, " samples"), x = "Measurement Time (min)", y = "Delta F/Fo") +
     scale_color_viridis_d(option = "turbo") +
     theme_bw() + 
-    theme(aspect.ratio= 1 / 2)
+    theme(aspect.ratio = 1 / 2)
   
   print(p)
   
-  ggsave(paste(paste(data.name, "figures", sep = "_"), paste(comparison$label, "DeltaF_Fo_Curves.pdf", sep = "_"), sep = "/")) 
-  
+  ggsave(paste(paste(data.name, "figures", sep = "_"), paste(comparison$label, "DeltaF_Fo_Curves.pdf", sep = "_"), sep = "/"))
 })
 ```
 
