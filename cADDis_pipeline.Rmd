@@ -313,8 +313,6 @@ lapply(parameters$experiment.comparisons, function(comparison) {
   samples <- samples %>%
     arrange(desc(Agonist.Conc)) %>%
     mutate(Group = factor(Group, levels = unique(Group)))
-  View(samples)
-  print()
   
   p <- ggplot(samples, aes(x = Measurement.Time, y = Mean.dF.Fo, color = Group)) +
     geom_point() + 
@@ -378,8 +376,6 @@ lapply(parameters$experiment.comparisons, function(comparison) {
     filter(Agonist.Conc != "NA")
   
   plottable.data$Agonist.Conc <- as.numeric(plottable.data$Agonist.Conc)
-  
-  View(plottable.data)
   
   p <- ggplot(plottable.data, aes(x = Agonist.Conc, y = Normalized.Mean.AUC)) +
     geom_point() + 
